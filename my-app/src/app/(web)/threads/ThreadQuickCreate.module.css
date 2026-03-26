@@ -1,0 +1,225 @@
+.wrap {
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  padding: 14px;
+  background: #ffffff;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.heading {
+  margin: 0;
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.primaryActions {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.actionBtn,
+.actionBtnActive {
+  border: 1px solid #cbd5e1;
+  background: #f8fafc;
+  color: #1e293b;
+  border-radius: 999px;
+  min-height: 38px;
+  padding: 0 10px;
+  font-size: 0.8rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.actionBtnActive {
+  border-color: #4f46e5;
+  background: #eef2ff;
+  color: #3730a3;
+}
+
+.groupLabel {
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: #334155;
+}
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.chip,
+.chipActive {
+  border: 1px solid #d1d5db;
+  background: #ffffff;
+  color: #1e293b;
+  border-radius: 999px;
+  min-height: 34px;
+  padding: 0 12px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.chipActive {
+  border-color: #0f766e;
+  background: #f0fdfa;
+  color: #115e59;
+}
+
+.noteInput {
+  width: 100%;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  min-height: 38px;
+  padding: 8px 10px;
+  font-size: 0.84rem;
+  color: #0f172a;
+  background: #ffffff;
+}
+
+.noteInput:focus {
+  outline: none;
+  border-color: #4f46e5;
+  box-shadow: 0 0 0 3px rgba(79, 70, 229, 0.1);
+}
+
+.summary {
+  margin: 0;
+  font-size: 0.84rem;
+  color: #475569;
+}
+
+.memberChecklist {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 180px;
+  overflow-y: auto;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  padding: 8px 10px;
+  background: #f8fafc;
+}
+
+.memberCheckItem {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: #1e293b;
+  cursor: pointer;
+  user-select: none;
+}
+
+.memberCheckItem input[type="checkbox"] {
+  width: 15px;
+  height: 15px;
+  accent-color: #4f46e5;
+  flex-shrink: 0;
+}
+
+.memberEmail {
+  margin-left: auto;
+  font-size: 0.76rem;
+  color: #64748b;
+  font-weight: 400;
+}
+
+.emailInputRow {
+  display: flex;
+  gap: 6px;
+  align-items: stretch;
+  margin-bottom: 8px;
+}
+
+.emailAddBtn {
+  border: 1px solid #cbd5e1;
+  background: #f8fafc;
+  color: #1e293b;
+  border-radius: 8px;
+  padding: 0 12px;
+  font-size: 0.82rem;
+  font-weight: 700;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.emailAddBtn:hover:not(:disabled) {
+  background: #e2e8f0;
+}
+
+.emailAddBtn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.error {
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid #fecaca;
+  background: #fef2f2;
+  color: #b91c1c;
+  font-size: 0.82rem;
+}
+
+.submitRow {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.submitBtn {
+  border: 1px solid #4f46e5;
+  background: #4f46e5;
+  color: #ffffff;
+  border-radius: 999px;
+  min-height: 36px;
+  padding: 0 14px;
+  font-size: 0.82rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.submitBtn:hover:not(:disabled) {
+  background: #4338ca;
+}
+
+.submitBtn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+@media (max-width: 640px) {
+  .wrap {
+    padding: 12px;
+  }
+
+  .primaryActions {
+    grid-template-columns: 1fr;
+  }
+
+  .actionBtn,
+  .actionBtnActive {
+    min-height: 42px;
+  }
+
+  .chip,
+  .chipActive {
+    min-height: 36px;
+  }
+
+  .submitRow {
+    justify-content: stretch;
+  }
+
+  .submitBtn {
+    width: 100%;
+    min-height: 40px;
+  }
+}

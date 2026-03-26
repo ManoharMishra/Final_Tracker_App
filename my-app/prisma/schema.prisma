@@ -1,0 +1,470 @@
+// prisma/schema.prisma
+// Thread Module — Only models relevant to this module
+// Full schema would include: organizations, users, messages, tasks, decisions, attachments, notifications
+
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["driverAdapters"]
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ─── Enums ──────────────────────────────────────────────────────────────────
+
+enum ThreadType {
+  private
+  team
+  org
+}
+
+enum ThreadStatus {
+  open
+  dormant
+  converted
+}
+
+enum ParticipantRole {
+  owner
+  member
+}
+
+enum ThreadEventType {
+  thread_created
+  thread_updated
+  thread_status_changed
+  participant_added
+  participant_removed
+  message_created
+  message_deleted
+  task_created
+  task_status_changed
+  decision_added
+  summary_created
+  attachment_added
+}
+
+enum TaskStatus {
+  open
+  in_progress
+  done
+}
+
+enum AttachmentEntityType {
+  thread
+  message
+  task
+}
+
+enum Role {
+  OWNER
+  ADMIN
+  MEMBER
+}
+
+enum ThreadInputType {
+  UPDATE
+  BLOCKER
+  IDEA
+  TASK_SOURCE
+}
+
+enum ThreadVisibility {
+  TEAM
+  ORG
+  PRIVATE
+}
+
+enum WorkType {
+  FEATURE
+  BUG
+  MEETING
+  OTHER
+}
+
+enum BlockerType {
+  CODE
+  DEPENDENCY
+  REQUIREMENT
+}
+
+enum Urgency {
+  LOW
+  MEDIUM
+  HIGH
+}
+
+enum IdeaImpact {
+  LOW
+  MEDIUM
+  HIGH
+}
+
+enum Impact {
+  LOW
+  MEDIUM
+  HIGH
+}
+
+enum ActivityType {
+  REACTION
+  CONVERTED_TO_TASK
+  COMMENT
+}
+
+// ─── Models ─────────────────────────────────────────────────────────────────
+
+model Organization {
+  id         String   @id @default(uuid()) @db.Uuid
+  name       String   @db.VarChar(100)
+  slug       String   @unique @db.VarChar(120)
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  users       User[]
+  threads     Thread[]
+  attachments Attachment[]
+  memberships Membership[]
+  invites     Invite[]
+  teams       Team[]
+
+  @@map("organizations")
+}
+
+model User {
+  id         String   @id @default(uuid()) @db.Uuid
+  email      String   @unique @db.VarChar(255)
+  name       String   @db.VarChar(100)
+  phone      String?  @db.VarChar(30)
+  avatar_url String?  @db.VarChar(500)
+  org_id     String   @db.Uuid
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  organization    Organization        @relation(fields: [org_id], references: [id], onDelete: Cascade)
+  created_threads Thread[]            @relation("ThreadCreator")
+  attachments     Attachment[]        @relation("UserAttachments")
+  participations  ThreadParticipant[]
+  thread_events   ThreadEvent[]       @relation("EventActor")
+  memberships     Membership[]
+  sent_invites    Invite[]            @relation("InviteCreator")
+  team_memberships TeamMember[]
+  thread_activities ThreadActivity[]
+  user_points     UserPoints?
+
+  @@index([org_id])
+  @@index([email])
+  @@map("users")
+}
+
+model UserPoints {
+  userId         String   @id @db.Uuid
+  points         Int      @default(0)
+  streak         Int      @default(0)
+  lastActiveDate DateTime?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("user_points")
+}
+
+model Membership {
+  id       String   @id @default(cuid())
+  userId   String   @db.Uuid
+  orgId    String   @db.Uuid
+  role     Role     @default(MEMBER)
+  joinedAt DateTime @default(now())
+
+  user User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  org  Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, orgId])
+  @@index([orgId])
+  @@index([userId])
+  @@map("memberships")
+}
+
+model Invite {
+  id        String   @id @default(cuid())
+  orgId     String   @db.Uuid
+  teamId    String?  @db.Uuid
+  role      Role     @default(MEMBER)
+  token     String   @db.VarChar(255)
+  invitedBy String   @db.Uuid
+  maxUses   Int?
+  usedCount Int      @default(0)
+  expiresAt DateTime?
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+
+  org     Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  team    Team?        @relation(fields: [teamId], references: [id], onDelete: SetNull)
+  inviter User         @relation("InviteCreator", fields: [invitedBy], references: [id], onDelete: Cascade)
+
+  @@index([orgId])
+  @@index([teamId])
+  @@index([invitedBy])
+  @@index([isActive])
+  @@index([expiresAt])
+  @@unique([token])
+  @@map("invites")
+}
+
+model Team {
+  id         String   @id @default(uuid()) @db.Uuid
+  orgId      String   @db.Uuid
+  name       String   @db.VarChar(100)
+  slug       String   @db.VarChar(120)
+  createdBy  String?  @db.Uuid
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  org      Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  invites  Invite[]
+  members  TeamMember[]
+  threads  Thread[]     @relation("ThreadTeam")
+
+  @@unique([orgId, slug])
+  @@index([orgId])
+  @@map("teams")
+}
+
+model TeamMember {
+  id        String   @id @default(cuid())
+  teamId    String   @db.Uuid
+  userId    String   @db.Uuid
+  joinedAt  DateTime @default(now())
+
+  team Team @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([teamId, userId])
+  @@index([teamId])
+  @@index([userId])
+  @@map("team_members")
+}
+
+model Thread {
+  id               String       @id @default(uuid()) @db.Uuid
+  title            String       @db.VarChar(200)
+  content          String?      @db.VarChar(500)
+  input_type       ThreadInputType?
+  type             ThreadType
+  visibility       ThreadVisibility?
+  status           ThreadStatus @default(open)
+  goal             String?      @db.VarChar(500)
+  org_id           String       @db.Uuid
+  team_id          String?      @db.Uuid
+  created_by       String       @db.Uuid
+  taskId           String?      @db.Uuid
+  last_activity_at DateTime     @default(now())
+  deleted_at       DateTime?
+  created_at       DateTime     @default(now())
+  updated_at       DateTime     @updatedAt
+
+  organization Organization        @relation(fields: [org_id], references: [id], onDelete: Cascade)
+  team         Team?               @relation("ThreadTeam", fields: [team_id], references: [id], onDelete: SetNull)
+  creator      User                @relation("ThreadCreator", fields: [created_by], references: [id])
+  participants ThreadParticipant[]
+  events       ThreadEvent[]
+  // Relations referenced in thread detail (counts only)
+  messages     Message[]
+  tasks        Task[]
+  decisions    Decision[]
+  summaries    ThreadSummary[]
+  attachments  Attachment[]        @relation("ThreadAttachments")
+  source_task  Task?               @relation("ThreadSourceTask", fields: [taskId], references: [id], onDelete: SetNull)
+  meta         ThreadMeta?
+  activities   ThreadActivity[]
+  stats        ThreadStats?
+
+  @@index([org_id, status])
+  @@index([org_id, type])
+  @@index([org_id])
+  @@index([team_id])
+  @@index([created_at(sort: Desc)])
+  @@index([last_activity_at(sort: Desc)])
+  @@index([created_by])
+  @@map("threads")
+}
+
+model ThreadMeta {
+  id          String       @id @default(cuid())
+  threadId    String       @unique @db.Uuid
+  workType    WorkType?
+  blockerType BlockerType?
+  urgency     Urgency?
+  ideaImpact  IdeaImpact?
+
+  thread Thread @relation(fields: [threadId], references: [id], onDelete: Cascade)
+
+  @@index([threadId])
+  @@map("thread_meta")
+}
+
+model ThreadActivity {
+  id        String       @id @default(cuid())
+  threadId  String       @db.Uuid
+  type      ActivityType
+  userId    String       @db.Uuid
+  metadata  Json         @default("{}")
+  createdAt DateTime     @default(now())
+
+  thread Thread @relation(fields: [threadId], references: [id], onDelete: Cascade)
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([threadId])
+  @@index([userId])
+  @@index([createdAt(sort: Desc)])
+  @@map("thread_activities")
+}
+
+model ThreadStats {
+  id              String @id @default(cuid())
+  threadId        String @unique @db.Uuid
+  reactionsCount  Int    @default(0)
+  commentsCount   Int    @default(0)
+  conversionCount Int    @default(0)
+
+  thread Thread @relation(fields: [threadId], references: [id], onDelete: Cascade)
+
+  @@index([threadId])
+  @@map("thread_stats")
+}
+
+model ThreadParticipant {
+  id           String          @id @default(uuid()) @db.Uuid
+  thread_id    String          @db.Uuid
+  user_id      String          @db.Uuid
+  role         ParticipantRole @default(member)
+  last_read_at DateTime?
+  created_at   DateTime        @default(now())
+  updated_at   DateTime        @updatedAt
+
+  thread Thread @relation(fields: [thread_id], references: [id], onDelete: Cascade)
+  user   User   @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@unique([thread_id, user_id])
+  @@index([user_id])
+  @@map("thread_participants")
+}
+
+model ThreadEvent {
+  id         String          @id @default(uuid()) @db.Uuid
+  thread_id  String          @db.Uuid
+  event_type ThreadEventType
+  actor_id   String?         @db.Uuid
+  payload    Json            @default("{}")
+  created_at DateTime        @default(now())
+
+  thread Thread @relation(fields: [thread_id], references: [id], onDelete: Cascade)
+  actor  User?  @relation("EventActor", fields: [actor_id], references: [id])
+
+  @@index([thread_id, created_at(sort: Desc)])
+  @@index([event_type])
+  @@map("thread_events")
+}
+
+model Attachment {
+  id          String @id @default(uuid()) @db.Uuid
+  org_id      String @db.Uuid
+  uploaded_by String @db.Uuid
+
+  file_name String @db.VarChar(255)
+  file_type String @db.VarChar(120)
+  file_size Int
+  file_url  String @db.VarChar(1000)
+
+  entity_type AttachmentEntityType
+  entity_id   String               @db.Uuid
+
+  thread_id  String? @db.Uuid
+  message_id String? @db.Uuid
+  task_id    String? @db.Uuid
+
+  created_at DateTime  @default(now())
+  deleted_at DateTime?
+
+  organization Organization @relation(fields: [org_id], references: [id], onDelete: Cascade)
+  uploader     User         @relation("UserAttachments", fields: [uploaded_by], references: [id], onDelete: Cascade)
+  thread       Thread?      @relation("ThreadAttachments", fields: [thread_id], references: [id], onDelete: Cascade)
+  message      Message?     @relation("MessageAttachments", fields: [message_id], references: [id], onDelete: Cascade)
+  task         Task?        @relation("TaskAttachments", fields: [task_id], references: [id], onDelete: Cascade)
+
+  @@index([org_id])
+  @@index([entity_type, entity_id])
+  @@index([thread_id])
+  @@map("attachments")
+}
+
+// ─── Minimal stubs for relation counts (not managed by this module) ─────────
+
+model Message {
+  id         String    @id @default(uuid()) @db.Uuid
+  thread_id  String    @db.Uuid
+  author_id  String    @db.Uuid
+  content    String
+  metadata   Json      @default("{}")
+  deleted_at DateTime?
+  created_at DateTime  @default(now())
+  updated_at DateTime  @updatedAt
+
+  thread      Thread       @relation(fields: [thread_id], references: [id], onDelete: Cascade)
+  attachments Attachment[] @relation("MessageAttachments")
+
+  @@index([thread_id, created_at(sort: Desc)])
+  @@map("messages")
+}
+
+model Task {
+  id                String     @id @default(uuid()) @db.Uuid
+  title             String     @db.VarChar(200)
+  status            TaskStatus @default(open)
+  thread_id         String?    @db.Uuid
+  source_message_id String?    @db.Uuid
+  assigned_to       String?    @db.Uuid
+  created_by        String     @db.Uuid
+  deleted_at        DateTime?
+  created_at        DateTime   @default(now())
+  updated_at        DateTime   @updatedAt
+
+  thread      Thread?      @relation(fields: [thread_id], references: [id], onDelete: SetNull)
+  attachments Attachment[] @relation("TaskAttachments")
+  source_threads Thread[]  @relation("ThreadSourceTask")
+
+  @@index([thread_id])
+  @@map("tasks")
+}
+
+model Decision {
+  id                String    @id @default(uuid()) @db.Uuid
+  thread_id         String    @db.Uuid
+  content           String
+  source_message_id String?   @db.Uuid
+  is_ai_generated   Boolean   @default(false)
+  created_by        String    @db.Uuid
+  deleted_at        DateTime?
+  created_at        DateTime  @default(now())
+  updated_at        DateTime  @updatedAt
+
+  thread Thread @relation(fields: [thread_id], references: [id], onDelete: Cascade)
+
+  @@index([thread_id, created_at(sort: Desc)])
+  @@map("decisions")
+}
+
+model ThreadSummary {
+  id         String   @id @default(uuid()) @db.Uuid
+  thread_id  String   @db.Uuid
+  content    String
+  version    Int
+  created_by String   @db.Uuid
+  created_at DateTime @default(now())
+
+  thread Thread @relation(fields: [thread_id], references: [id], onDelete: Cascade)
+
+  @@unique([thread_id, version])
+  @@index([thread_id, version(sort: Desc)])
+  @@map("thread_summaries")
+}
