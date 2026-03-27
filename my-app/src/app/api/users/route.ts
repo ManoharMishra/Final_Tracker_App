@@ -58,7 +58,9 @@ export async function GET(request: NextRequest) {
       throw new ApiError("NOT_FOUND", "User not found");
     }
 
-    assertSessionOrg(session, user.org_id);
+    if (session.orgId !== user.org_id) {
+      throw new ApiError("FORBIDDEN", "User does not belong to your organization");
+    }
 
     return Response.json({ data: user });
   } catch (error) {

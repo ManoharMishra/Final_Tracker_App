@@ -27,17 +27,22 @@ export async function PATCH(request: NextRequest) {
     const { userId, teamIds } = parsed.data;
     const uniqueTeamIds = Array.from(new Set(teamIds));
 
-    const adminTeamRows = actor.role === "ADMIN"
-      ? await prisma.$queryRaw<Array<{ teamId: string }>>`
-          SELECT tm."teamId"
-          FROM team_members tm
-          INNER JOIN teams t ON t.id = tm."teamId"
-          WHERE tm."userId" = ${actorId}::uuid
-            AND t."orgId" = ${actor.orgId}::uuid
+    const manageableTeamRows = actor.role === "ADMIN"
+      ? await prisma.$queryRaw<Array<{ id: string }>>`
+          SELECT DISTINCT t.id
+          FROM teams t
+          LEFT JOIN team_members tm
+            ON tm."teamId" = t.id
+           AND tm."userId" = ${actorId}::uuid
+          WHERE t."orgId" = ${actor.orgId}::uuid
+            AND (
+              tm."userId" IS NOT NULL
+              OR t."createdBy" = ${actorId}::uuid
+            )
         `
       : [];
 
-    const adminTeamIds = new Set(adminTeamRows.map((row) => row.teamId));
+    const manageableTeamIds = new Set(manageableTeamRows.map((row) => row.id));
 
     const memberRows = await prisma.$queryRaw<Array<{ role: "OWNER" | "ADMIN" | "MEMBER" }>>`
       SELECT role
@@ -57,23 +62,13 @@ export async function PATCH(request: NextRequest) {
         throw new ApiError("FORBIDDEN", "ADMIN cannot modify OWNER team assignments");
       }
 
-      const targetVisibleRows = await prisma.$queryRaw<Array<{ teamId: string }>>`
-        SELECT tm."teamId"
-        FROM team_members tm
-        INNER JOIN teams t ON t.id = tm."teamId"
-        WHERE tm."userId" = ${userId}::uuid
-          AND t."orgId" = ${actor.orgId}::uuid
-          AND tm."teamId" = ANY(${Array.from(adminTeamIds)}::uuid[])
-        LIMIT 1
-      `;
-
-      if (!targetVisibleRows[0]) {
-        throw new ApiError("FORBIDDEN", "ADMIN can only manage members in assigned teams");
+      if (manageableTeamIds.size === 0) {
+        throw new ApiError("FORBIDDEN", "ADMIN has no manageable teams");
       }
 
-      const requestedOutsideScope = uniqueTeamIds.some((teamId) => !adminTeamIds.has(teamId));
+      const requestedOutsideScope = uniqueTeamIds.some((teamId) => !manageableTeamIds.has(teamId));
       if (requestedOutsideScope) {
-        throw new ApiError("FORBIDDEN", "ADMIN can only assign members to their own teams");
+        throw new ApiError("FORBIDDEN", "ADMIN can only assign members to manageable teams");
       }
     }
 
@@ -89,16 +84,11 @@ export async function PATCH(request: NextRequest) {
     }
 
     await prisma.$transaction(async (tx) => {
-      const finalTeamIds =
-        actor.role === "ADMIN"
-          ? Array.from(adminTeamIds).filter((teamId) => uniqueTeamIds.includes(teamId))
-          : uniqueTeamIds;
-
       if (actor.role === "ADMIN") {
         await tx.$executeRaw`
           DELETE FROM team_members
           WHERE "userId" = ${userId}::uuid
-            AND "teamId" = ANY(${Array.from(adminTeamIds)}::uuid[])
+            AND "teamId" = ANY(${Array.from(manageableTeamIds)}::uuid[])
         `;
       } else {
         await tx.$executeRaw`
@@ -107,7 +97,7 @@ export async function PATCH(request: NextRequest) {
         `;
       }
 
-      for (const teamId of finalTeamIds) {
+      for (const teamId of uniqueTeamIds) {
         await tx.$executeRaw`
           INSERT INTO team_members (id, "teamId", "userId", "joinedAt")
           VALUES (

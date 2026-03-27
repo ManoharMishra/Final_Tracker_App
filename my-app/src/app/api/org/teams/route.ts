@@ -27,17 +27,22 @@ export async function GET(request: NextRequest) {
     assertManagerRole(actor.role);
 
     if (actor.role === "ADMIN") {
-      const actorTeamRows = await prisma.$queryRaw<Array<{ teamId: string }>>`
-        SELECT tm."teamId"
-        FROM team_members tm
-        INNER JOIN teams t ON t.id = tm."teamId"
-        WHERE tm."userId" = ${actorId}::uuid
-          AND t."orgId" = ${actor.orgId}::uuid
+      const manageableTeamRows = await prisma.$queryRaw<Array<{ id: string }>>`
+        SELECT DISTINCT t.id
+        FROM teams t
+        LEFT JOIN team_members tm
+          ON tm."teamId" = t.id
+         AND tm."userId" = ${actorId}::uuid
+        WHERE t."orgId" = ${actor.orgId}::uuid
+          AND (
+            tm."userId" IS NOT NULL
+            OR t."createdBy" = ${actorId}::uuid
+          )
       `;
 
-      const actorTeamIds = actorTeamRows.map((row) => row.teamId);
+      const manageableTeamIds = manageableTeamRows.map((row) => row.id);
 
-      if (actorTeamIds.length === 0) {
+      if (manageableTeamIds.length === 0) {
         return Response.json({ data: { teams: [], members: [] } });
       }
 
@@ -60,7 +65,7 @@ export async function GET(request: NextRequest) {
           FROM teams t
           LEFT JOIN team_members tm ON tm."teamId" = t.id
           WHERE t."orgId" = ${actor.orgId}::uuid
-            AND t.id = ANY(${actorTeamIds}::uuid[])
+            AND t.id = ANY(${manageableTeamIds}::uuid[])
           GROUP BY t.id, t.name, t.slug, t."createdAt"
           ORDER BY t.name ASC
         `,
@@ -92,7 +97,7 @@ export async function GET(request: NextRequest) {
           INNER JOIN team_members tm ON tm."userId" = u.id
           INNER JOIN teams t ON t.id = tm."teamId"
           WHERE m."orgId" = ${actor.orgId}::uuid
-            AND tm."teamId" = ANY(${actorTeamIds}::uuid[])
+            AND tm."teamId" = ANY(${manageableTeamIds}::uuid[])
             AND m.role <> 'OWNER'
           GROUP BY u.id, u.name, u.email, m.role
           ORDER BY
@@ -104,7 +109,7 @@ export async function GET(request: NextRequest) {
         `,
       ]);
 
-      return Response.json({ data: { teams, members } });
+      return Response.json({ data: { teams, members, actorRole: actor.role } });
     }
 
     const [teams, members] = await Promise.all([
@@ -168,7 +173,7 @@ export async function GET(request: NextRequest) {
       `,
     ]);
 
-    return Response.json({ data: { teams, members } });
+    return Response.json({ data: { teams, members, actorRole: actor.role } });
   } catch (error) {
     return handleApiError(error);
   }
@@ -211,23 +216,43 @@ export async function POST(request: NextRequest) {
       suffix += 1;
     }
 
-    const createdRows = await prisma.$queryRaw<
-      Array<{ id: string; name: string; slug: string; createdAt: Date }>
-    >`
-      INSERT INTO teams (id, "orgId", name, slug, "createdBy", "createdAt", "updatedAt")
-      VALUES (
-        ${randomUUID()}::uuid,
-        ${actor.orgId}::uuid,
-        ${parsed.data.name},
-        ${slug},
-        ${actorId}::uuid,
-        now(),
-        now()
-      )
-      RETURNING id, name, slug, "createdAt"
-    `;
+    const teamId = randomUUID();
+    const created = await prisma.$transaction(async (tx) => {
+      const createdRows = await tx.$queryRaw<
+        Array<{ id: string; name: string; slug: string; createdAt: Date }>
+      >`
+        INSERT INTO teams (id, "orgId", name, slug, "createdBy", "createdAt", "updatedAt")
+        VALUES (
+          ${teamId}::uuid,
+          ${actor.orgId}::uuid,
+          ${parsed.data.name},
+          ${slug},
+          ${actorId}::uuid,
+          now(),
+          now()
+        )
+        RETURNING id, name, slug, "createdAt"
+      `;
 
-    const created = createdRows[0];
+      const createdTeam = createdRows[0];
+      if (!createdTeam) {
+        return null;
+      }
+
+      await tx.$executeRaw`
+        INSERT INTO team_members (id, "teamId", "userId", "joinedAt")
+        VALUES (
+          ${randomUUID()},
+          ${teamId}::uuid,
+          ${actorId}::uuid,
+          now()
+        )
+        ON CONFLICT ("teamId", "userId") DO NOTHING
+      `;
+
+      return createdTeam;
+    });
+
     if (!created) {
       throw new ApiError("INTERNAL_ERROR", "Failed to create team");
     }
@@ -235,7 +260,7 @@ export async function POST(request: NextRequest) {
     return Response.json({
       data: {
         ...created,
-        memberCount: 0,
+        memberCount: 1,
       },
     }, { status: 201 });
   } catch (error) {

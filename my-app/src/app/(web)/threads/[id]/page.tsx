@@ -158,7 +158,10 @@ export default function ThreadDetailPage() {
 
     getThreadById(id)
       .then(async (threadData) => {
-        let messageData: Awaited<ReturnType<typeof getMessages>> = { data: [] };
+        let messageData: Awaited<ReturnType<typeof getMessages>> = {
+          data: [],
+          pagination: { page: 1, limit: 20, total: 0, total_pages: 0 },
+        };
         try {
           const res = await getMessages(id, 1, 20);
           console.log("MESSAGES:", res);
@@ -176,7 +179,10 @@ export default function ThreadDetailPage() {
           );
         }
 
-        let taskData: Awaited<ReturnType<typeof getTasks>> = { data: [] };
+        let taskData: Awaited<ReturnType<typeof getTasks>> = {
+          data: [],
+          pagination: { page: 1, limit: 20, total: 0, total_pages: 0 },
+        };
         try {
           const res = await getTasks(id, 1, 20);
           console.log("TASKS:", res);
@@ -202,7 +208,10 @@ export default function ThreadDetailPage() {
           if (!res || !Array.isArray(res.data)) {
             console.error("WRONG SHAPE: GET /api/decisions", { response: res });
             setDecisionsError("Decisions response has wrong shape.");
-            decisionData = { data: [] };
+            decisionData = {
+              data: [],
+              pagination: { page: 1, limit: 20, total: 0, total_pages: 0 },
+            };
           } else {
             decisionData = res;
           }
@@ -211,7 +220,10 @@ export default function ThreadDetailPage() {
           setDecisionsError(
             `Decisions failed: ${e instanceof Error ? e.message : "Unknown error"}`
           );
-          decisionData = { data: [] };
+          decisionData = {
+            data: [],
+            pagination: { page: 1, limit: 20, total: 0, total_pages: 0 },
+          };
         }
 
         let participantData: ParticipantResponse[] = [];

@@ -42,6 +42,20 @@ export async function POST(request: NextRequest) {
     `;
 
     const actorTeamIds = new Set(actorTeamRows.map((row) => row.teamId));
+
+    const adminCreatedTeamRows = actor.role === "ADMIN"
+      ? await prisma.$queryRaw<Array<{ id: string }>>`
+          SELECT t.id
+          FROM teams t
+          WHERE t."orgId" = ${actor.orgId}::uuid
+            AND t."createdBy" = ${actorId}::uuid
+        `
+      : [];
+
+    const manageableTeamIds = actor.role === "ADMIN"
+      ? new Set([...actorTeamIds, ...adminCreatedTeamRows.map((row) => row.id)])
+      : actorTeamIds;
+
     const requestedTeamId = parsed.data.teamId ?? null;
 
     if (parsed.data.role === "ADMIN" && !requestedTeamId) {
@@ -57,16 +71,16 @@ export async function POST(request: NextRequest) {
     }
 
     if (actor.role === "ADMIN" || actor.role === "MEMBER") {
-      if (actorTeamIds.size === 0) {
-        throw new ApiError("FORBIDDEN", `${actor.role} must belong to a team to create invites`);
+      if (manageableTeamIds.size === 0) {
+        throw new ApiError("FORBIDDEN", `${actor.role} has no manageable teams for invite creation`);
       }
 
       if (!requestedTeamId) {
         throw new ApiError("BAD_REQUEST", "teamId is required for ADMIN and MEMBER invites");
       }
 
-      if (!actorTeamIds.has(requestedTeamId)) {
-        throw new ApiError("FORBIDDEN", `${actor.role} can only create invites for their own team`);
+      if (!manageableTeamIds.has(requestedTeamId)) {
+        throw new ApiError("FORBIDDEN", `${actor.role} can only create invites for manageable teams`);
       }
     }
 

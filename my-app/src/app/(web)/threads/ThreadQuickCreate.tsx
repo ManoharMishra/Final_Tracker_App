@@ -125,9 +125,9 @@ export default function ThreadQuickCreate({ actorId, onCreated }: ThreadQuickCre
     const MEMBERS_PER_PAGE = 4;
     const sortedMembers = useMemo(() => {
       return [...members].sort((a, b) => {
-        const aIsOwner = a.role === "OWNER" ? 1 : 0;
-        const bIsOwner = b.role === "OWNER" ? 1 : 0;
-        return aIsOwner - bIsOwner;
+        const aLabel = (a.name || a.email).toLowerCase();
+        const bLabel = (b.name || b.email).toLowerCase();
+        return aLabel.localeCompare(bLabel);
       });
     }, [members]);
 
@@ -411,22 +411,22 @@ export default function ThreadQuickCreate({ actorId, onCreated }: ThreadQuickCre
             <>
               <div className={styles.memberChecklist}>
                 {paginatedMembers.map((m) => (
-                <label key={m.id} className={styles.memberCheckItem}>
-                  <input
-                    type="checkbox"
-                    checked={selectedMemberIds.includes(m.id)}
-                    onChange={(e) =>
-                      setSelectedMemberIds((prev) =>
-                        e.target.checked ? [...prev, m.id] : prev.filter((x) => x !== m.id)
-                      )
-                    }
-                  />
-                  <span>{m.name || m.email}</span>
-                  <span className={styles.memberEmail}>{m.email}</span>
-                </label>
-              )))} 
-            </div>
-          )}
+                  <label key={m.id} className={styles.memberCheckItem}>
+                    <input
+                      type="checkbox"
+                      checked={selectedMemberIds.includes(m.id)}
+                      onChange={(e) =>
+                        setSelectedMemberIds((prev) =>
+                          e.target.checked ? [...prev, m.id] : prev.filter((x) => x !== m.id)
+                        )
+                      }
+                    />
+                    <span>{m.name || m.email}</span>
+                    <span className={styles.memberEmail}>{m.email}</span>
+                  </label>
+                ))}
+              </div>
+
               {totalMemberPages > 1 && (
                 <div className={styles.memberPagination}>
                   <button
@@ -450,8 +450,11 @@ export default function ThreadQuickCreate({ actorId, onCreated }: ThreadQuickCre
                   </button>
                 </div>
               )}
-          {visibility === "PRIVATE" && selectedMemberIds.length === 0 && !loadingMeta && members.length > 0 && (
-            <p className={styles.summary}>⚠ Select at least one member to share with.</p>
+
+              {selectedMemberIds.length === 0 && (
+                <p className={styles.summary}>⚠ Select at least one member to share with.</p>
+              )}
+            </>
           )}
         </>
       )}

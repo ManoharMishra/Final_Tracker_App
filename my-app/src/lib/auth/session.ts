@@ -29,6 +29,13 @@ export type SessionData = {
   expiresAt: string;
 };
 
+function shouldUseSecureCookie() {
+  const override = process.env.SESSION_COOKIE_SECURE;
+  if (override === "true") return true;
+  if (override === "false") return false;
+  return process.env.NODE_ENV === "production";
+}
+
 function getSessionSecret() {
   if (process.env.SESSION_SECRET) {
     return process.env.SESSION_SECRET;
@@ -172,7 +179,7 @@ export function applySessionCookie(response: NextResponse, token: string, expire
     value: token,
     httpOnly: true,
     sameSite: "lax",
-    secure: process.env.NODE_ENV === "production",
+    secure: shouldUseSecureCookie(),
     path: "/",
     expires: new Date(expiresAt),
   });
@@ -184,7 +191,7 @@ export function clearSessionCookie(response: NextResponse) {
     value: "",
     httpOnly: true,
     sameSite: "lax",
-    secure: process.env.NODE_ENV === "production",
+    secure: shouldUseSecureCookie(),
     path: "/",
     expires: new Date(0),
   });

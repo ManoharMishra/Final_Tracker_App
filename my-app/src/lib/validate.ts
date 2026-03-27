@@ -125,7 +125,7 @@ export async function validateThreadAccess(
 ): Promise<{ thread_id: string; org_id: string }> {
   const thread = await tx.thread.findFirst({
     where: { id: threadId, deleted_at: null },
-    select: { id: true, org_id: true, type: true, team_id: true },
+    select: { id: true, org_id: true, type: true, team_id: true, status: true },
   });
 
   if (!thread) {
@@ -134,6 +134,10 @@ export async function validateThreadAccess(
 
   await validateUser(tx, userId);
   await validateUserInOrg(tx, userId, thread.org_id);
+
+  if (options?.forUpdate && thread.status !== "open") {
+    throw new ApiError("FORBIDDEN", "This thread is read-only");
+  }
 
   if (options?.forUpdate && thread.type !== "org") {
     // Use FOR UPDATE row lock for non-org threads to prevent race conditions

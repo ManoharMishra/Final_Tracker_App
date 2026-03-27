@@ -1,3 +1,4 @@
+import { randomUUID } from "crypto";
 import { NextRequest } from "next/server";
 import { z } from "zod";
 import { ApiError, handleApiError } from "@/lib/errors";
@@ -42,16 +43,23 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
     }
 
     if (actor.role === "ADMIN") {
-      const adminTeamRows = await prisma.$queryRaw<Array<{ teamId: string }>>`
-        SELECT tm."teamId"
-        FROM team_members tm
-        INNER JOIN teams t ON t.id = tm."teamId"
-        WHERE tm."userId" = ${actorId}::uuid
-          AND t."orgId" = ${actor.orgId}::uuid
+      const manageableRows = await prisma.$queryRaw<Array<{ id: string }>>`
+        SELECT DISTINCT t.id
+        FROM teams t
+        LEFT JOIN team_members tm
+          ON tm."teamId" = t.id
+         AND tm."userId" = ${actorId}::uuid
+        WHERE t."orgId" = ${actor.orgId}::uuid
+          AND (
+            tm."userId" IS NOT NULL
+            OR t."createdBy" = ${actorId}::uuid
+          )
+          AND t.id = ${teamId}::uuid
+        LIMIT 1
       `;
 
-      if (!adminTeamRows.some((row) => row.teamId === teamId)) {
-        throw new ApiError("FORBIDDEN", "ADMIN can only rename assigned teams");
+      if (!manageableRows[0]) {
+        throw new ApiError("FORBIDDEN", "ADMIN can only rename manageable teams");
       }
     }
 
@@ -64,6 +72,134 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
     `;
 
     return Response.json({ data: updatedRows[0] ?? null });
+  } catch (error) {
+    return handleApiError(error);
+  }
+}
+
+export async function DELETE(request: NextRequest, context: RouteContext) {
+  try {
+    const actorId = request.headers.get("x-user-id") ?? "";
+    const actor = await getActorContext(actorId);
+    assertManagerRole(actor.role);
+
+    const { teamId } = await context.params;
+    if (!teamId) {
+      throw new ApiError("BAD_REQUEST", "teamId is required");
+    }
+
+    const existingRows = await prisma.$queryRaw<Array<{ id: string }>>`
+      SELECT id
+      FROM teams
+      WHERE id = ${teamId}::uuid
+        AND "orgId" = ${actor.orgId}::uuid
+      LIMIT 1
+    `;
+
+    if (!existingRows[0]) {
+      throw new ApiError("NOT_FOUND", "Team not found in this organization");
+    }
+
+    if (actor.role === "ADMIN") {
+      const manageableRows = await prisma.$queryRaw<Array<{ id: string }>>`
+        SELECT DISTINCT t.id
+        FROM teams t
+        LEFT JOIN team_members tm
+          ON tm."teamId" = t.id
+         AND tm."userId" = ${actorId}::uuid
+        WHERE t."orgId" = ${actor.orgId}::uuid
+          AND (
+            tm."userId" IS NOT NULL
+            OR t."createdBy" = ${actorId}::uuid
+          )
+          AND t.id = ${teamId}::uuid
+        LIMIT 1
+      `;
+
+      if (!manageableRows[0]) {
+        throw new ApiError("FORBIDDEN", "ADMIN can only delete manageable teams");
+      }
+    }
+
+    const teamMemberRows = await prisma.$queryRaw<Array<{ userId: string }>>`
+      SELECT tm."userId"
+      FROM team_members tm
+      WHERE tm."teamId" = ${teamId}::uuid
+    `;
+
+    if (actor.role !== "OWNER" && teamMemberRows.length > 0) {
+      throw new ApiError("BAD_REQUEST", "Cannot delete team with members. Remove all members first.");
+    }
+
+    const conversion = await prisma.$transaction(async (tx) => {
+      const threadRows = await tx.$queryRaw<Array<{ id: string }>>`
+        SELECT id
+        FROM threads
+        WHERE team_id = ${teamId}::uuid
+          AND deleted_at IS NULL
+      `;
+
+      const threadIds = threadRows.map((row) => row.id);
+      const memberIds = Array.from(new Set(teamMemberRows.map((row) => row.userId)));
+
+      // Safety net for future policy changes: if team had members, preserve access by adding them as participants.
+      if (threadIds.length > 0 && memberIds.length > 0) {
+        for (const threadId of threadIds) {
+          for (const userId of memberIds) {
+            await tx.$executeRaw`
+              INSERT INTO thread_participants (id, thread_id, user_id, role, created_at, updated_at)
+              VALUES (
+                ${randomUUID()}::uuid,
+                ${threadId}::uuid,
+                ${userId}::uuid,
+                'member'::"ParticipantRole",
+                now(),
+                now()
+              )
+              ON CONFLICT (thread_id, user_id) DO NOTHING
+            `;
+          }
+        }
+      }
+
+      await tx.$executeRaw`
+        DELETE FROM team_members
+        WHERE "teamId" = ${teamId}::uuid
+      `;
+
+      let convertedThreadCount = 0;
+      if (threadIds.length > 0) {
+        const updatedRows = await tx.$queryRaw<Array<{ id: string }>>`
+          UPDATE threads
+          SET
+            team_id = NULL,
+            type = 'private'::"ThreadType",
+            visibility = 'PRIVATE'::"ThreadVisibility",
+            status = 'dormant'::"ThreadStatus",
+            updated_at = now()
+          WHERE id = ANY(${threadIds}::uuid[])
+          RETURNING id
+        `;
+        convertedThreadCount = updatedRows.length;
+      }
+
+      await tx.$executeRaw`
+        DELETE FROM teams
+        WHERE id = ${teamId}::uuid
+      `;
+
+      return { convertedThreadCount };
+    });
+
+    return Response.json({
+      data: {
+        id: teamId,
+        deleted: true,
+        convertedThreadCount: conversion.convertedThreadCount,
+        convertedToScope: "participant",
+        forceDeletedByOwner: actor.role === "OWNER" && teamMemberRows.length > 0,
+      },
+    });
   } catch (error) {
     return handleApiError(error);
   }

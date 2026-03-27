@@ -23,6 +23,7 @@ type Member = {
 type Payload = {
   teams: Team[];
   members: Member[];
+  actorRole?: "OWNER" | "ADMIN" | "MEMBER";
 };
 
 function getErrorMessage(payload: unknown, fallback: string): string {
@@ -40,8 +41,10 @@ export default function OrgTeamsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
+  const [actorRole, setActorRole] = useState<"OWNER" | "ADMIN" | "MEMBER" | null>(null);
 
   const [teams, setTeams] = useState<Team[]>([]);
+  const [selectedTeamId, setSelectedTeamId] = useState("");
   const [members, setMembers] = useState<Member[]>([]);
 
   const [newTeamName, setNewTeamName] = useState("");
@@ -49,6 +52,7 @@ export default function OrgTeamsPage() {
 
   const [renamingTeamId, setRenamingTeamId] = useState<string | null>(null);
   const [renameDrafts, setRenameDrafts] = useState<Record<string, string>>({});
+  const [deletingTeamId, setDeletingTeamId] = useState<string | null>(null);
 
   const [movingUserId, setMovingUserId] = useState<string | null>(null);
   const [pendingTeamSelection, setPendingTeamSelection] = useState<Record<string, string[]>>({});
@@ -70,7 +74,12 @@ export default function OrgTeamsPage() {
       }
 
       const data = (json.data ?? {}) as Partial<Payload>;
-      setTeams(Array.isArray(data.teams) ? data.teams : []);
+      const nextTeams = Array.isArray(data.teams) ? data.teams : [];
+      setTeams(nextTeams);
+      setActorRole(data.actorRole ?? null);
+      setSelectedTeamId((prev) =>
+        prev && nextTeams.some((team) => team.id === prev) ? prev : (nextTeams[0]?.id ?? "")
+      );
       const nextMembers = Array.isArray(data.members) ? data.members : [];
       setMembers(nextMembers);
       setPendingTeamSelection(
@@ -180,12 +189,56 @@ export default function OrgTeamsPage() {
     }
   }
 
+  async function handleDeleteTeam(teamId: string) {
+    const team = teamsById.get(teamId);
+    if (!team) return;
+
+    const canForceDelete = actorRole === "OWNER";
+    if (!canForceDelete && team.memberCount > 0) {
+      setError("Remove all members before deleting this team.");
+      return;
+    }
+
+    const confirmed = window.confirm(
+      `Delete team \"${team.name}\"? This cannot be undone. Linked threads will be preserved and converted.`
+    );
+    if (!confirmed) return;
+
+    setDeletingTeamId(teamId);
+    setError(null);
+    setStatus(null);
+
+    try {
+      const res = await fetch(`/api/org/teams/${encodeURIComponent(teamId)}`, {
+        method: "DELETE",
+      });
+      const json = await res.json();
+      if (!res.ok) {
+        throw new Error(getErrorMessage(json, "Failed to delete team"));
+      }
+
+      const convertedCount = Number(json?.data?.convertedThreadCount ?? 0);
+      setStatus(
+        convertedCount > 0
+          ? `Team deleted. ${convertedCount} thread(s) were preserved and converted.`
+          : "Team deleted."
+      );
+      await loadData();
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Unknown error");
+    } finally {
+      setDeletingTeamId(null);
+    }
+  }
+
+  const selectedTeam = selectedTeamId ? (teamsById.get(selectedTeamId) ?? null) : null;
+
   return (
     <div className={styles.page}>
       <header className={styles.header}>
         <h1 className={styles.title}>Team Management</h1>
         <p className={styles.subtitle}>
-          Create departments, rename teams, and assign members to teams.
+          Create groups, rename teams, and assign any organization member to them.
         </p>
       </header>
 
@@ -216,38 +269,69 @@ export default function OrgTeamsPage() {
         ) : teams.length === 0 ? (
           <p className={styles.muted}>No teams found.</p>
         ) : (
-          <div className={styles.list}>
-            {teams.map((team) => (
-              <div key={team.id} className={styles.listItem}>
-                <div className={styles.teamMeta}>
-                  <strong>{team.name}</strong>
-                  <span>{team.memberCount} members</span>
-                </div>
-                <div className={styles.renameRow}>
-                  <input
-                    className={styles.input}
-                    type="text"
-                    value={renameDrafts[team.id] ?? team.name}
-                    onChange={(e) =>
-                      setRenameDrafts((prev) => ({
-                        ...prev,
-                        [team.id]: e.target.value,
-                      }))
-                    }
-                    disabled={renamingTeamId === team.id}
-                  />
-                  <button
-                    className={styles.secondaryBtn}
-                    type="button"
-                    onClick={() => void handleRenameTeam(team.id)}
-                    disabled={renamingTeamId === team.id}
-                  >
-                    {renamingTeamId === team.id ? "Saving..." : "Rename"}
-                  </button>
-                </div>
+          <>
+            <div className={styles.renameRow}>
+              <select
+                className={styles.input}
+                value={selectedTeamId}
+                onChange={(e) => setSelectedTeamId(e.target.value)}
+              >
+                {teams.map((team) => (
+                  <option key={team.id} value={team.id}>
+                    {team.name}
+                  </option>
+                ))}
+              </select>
+              <span className={styles.muted}>
+                {selectedTeam ? `${selectedTeam.memberCount} members` : ""}
+              </span>
+            </div>
+
+            {selectedTeam && (
+              <div className={styles.renameRow}>
+                <input
+                  className={styles.input}
+                  type="text"
+                  value={renameDrafts[selectedTeam.id] ?? selectedTeam.name}
+                  onChange={(e) =>
+                    setRenameDrafts((prev) => ({
+                      ...prev,
+                      [selectedTeam.id]: e.target.value,
+                    }))
+                  }
+                  disabled={renamingTeamId === selectedTeam.id}
+                />
+                <button
+                  className={styles.secondaryBtn}
+                  type="button"
+                  onClick={() => void handleRenameTeam(selectedTeam.id)}
+                  disabled={renamingTeamId === selectedTeam.id}
+                >
+                  {renamingTeamId === selectedTeam.id ? "Saving..." : "Rename"}
+                </button>
+                <button
+                  className={styles.dangerBtn}
+                  type="button"
+                  onClick={() => void handleDeleteTeam(selectedTeam.id)}
+                  disabled={deletingTeamId === selectedTeam.id || (actorRole !== "OWNER" && selectedTeam.memberCount > 0)}
+                  title={
+                    actorRole !== "OWNER" && selectedTeam.memberCount > 0
+                      ? "Remove all members first"
+                      : "Delete team"
+                  }
+                >
+                  {deletingTeamId === selectedTeam.id ? "Deleting..." : "Delete"}
+                </button>
               </div>
-            ))}
-          </div>
+            )}
+
+            {selectedTeam && selectedTeam.memberCount > 0 && actorRole !== "OWNER" && (
+              <p className={styles.muted}>Delete is available only when member count is 0.</p>
+            )}
+            {selectedTeam && selectedTeam.memberCount > 0 && actorRole === "OWNER" && (
+              <p className={styles.muted}>Owner force-delete is enabled even when team has members.</p>
+            )}
+          </>
         )}
       </section>
 
@@ -327,7 +411,7 @@ export default function OrgTeamsPage() {
 
       <section className={styles.note}>
         <p>
-          Note: ADMIN sees only assigned teams and non-owner members in those teams. ADMIN and MEMBER invite links are restricted to their own teams.
+          Note: OWNER can manage all teams. ADMIN can view and manage only teams they created or belong to. Invite links remain restricted by each actor&apos;s invite policy.
         </p>
       </section>
     </div>
